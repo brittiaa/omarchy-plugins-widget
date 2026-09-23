@@ -2301,7 +2301,7 @@ test("the week count reads as a sentence", () => {
 })
 
 test("a username that could become something else in a URL is refused", () => {
-  for (const good of ["anishfn", "a", "a-b", "torvalds", "x".repeat(39), "user-name-1"]) {
+  for (const good of ["brittiaa", "a", "a-b", "torvalds", "x".repeat(39), "user-name-1"]) {
     assert.equal(Model.isSafeLogin(good), true, `${good} should be allowed`)
   }
   for (const bad of ["", "-lead", "trail-", "two--hyphens", "has space", "has/slash",
@@ -2313,15 +2313,15 @@ test("a username that could become something else in a URL is refused", () => {
 test("logins in use are unique, safe, and include the ones switched off", () => {
   const config = Model.normalizeConfig({
     widgets: [
-      { id: "a", type: "github", enabled: true, col: 0, row: 0, settings: { login: "anishfn" } },
-      { id: "b", type: "github", enabled: false, col: 0, row: 1, settings: { login: "anishfn" } },
+      { id: "a", type: "github", enabled: true, col: 0, row: 0, settings: { login: "brittiaa" } },
+      { id: "b", type: "github", enabled: false, col: 0, row: 1, settings: { login: "brittiaa" } },
       { id: "c", type: "github", enabled: false, col: 0, row: 2, settings: { login: "torvalds" } },
       { id: "d", type: "github", enabled: true, col: 0, row: 3, settings: { login: "../../etc" } },
       { id: "e", type: "github", enabled: true, col: 0, row: 4, settings: { login: "" } },
       { id: "f", type: "clock", enabled: true, col: 1, row: 0 }
     ]
   })
-  assert.deepEqual(Model.loginsInUse(config), ["anishfn", "torvalds"])
+  assert.deepEqual(Model.loginsInUse(config), ["brittiaa", "torvalds"])
 })
 
 test("the github widget declares where it goes, and is wide by default", () => {

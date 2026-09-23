@@ -10,10 +10,6 @@
 </p>
 
 <p align="center">
-  <sub>A fork of <a href="https://github.com/anishfn/omarchy-widgets">anishfn/omarchy-widgets</a>, by Anish Gupta and contributors.</sub>
-</p>
-
-<p align="center">
   <a href="#install"><img alt="Install" src="https://img.shields.io/badge/install-omarchy%20plugin%20add-7fbbb3?style=for-the-badge"></a>
   <a href="https://github.com/brittiaa/omarchy-plugins-widget/releases"><img alt="Releases" src="https://img.shields.io/github/v/release/brittiaa/omarchy-plugins-widget?style=for-the-badge&color=e8845f&label=release"></a>
   <a href="CONTRIBUTING.md"><img alt="Contributing" src="https://img.shields.io/badge/widgets-welcome-dfd8c8?style=for-the-badge"></a>
@@ -75,21 +71,6 @@ plugins land disabled.
 > already installed, so running the install line a second time reports an
 > error rather than pulling anything. Use `update` — either the script above
 > or `omarchy plugin update brittiaa.widgets`.
-
-> **Coming from the original plugin?** This fork installs as
-> `brittiaa.widgets`; upstream is `anishfn.widgets` (and, before 0.2.0,
-> `io.github.anishfn.widgets`). An id is also a directory name, so the two sit
-> side by side and would draw the desktop twice. Remove the old one first:
->
-> ```bash
-> omarchy plugin remove anishfn.widgets
-> omarchy plugin add https://github.com/brittiaa/omarchy-plugins-widget.git
-> omarchy plugin enable brittiaa.widgets
-> ```
->
-> Your desktop survives the round trip — `remove` leaves
-> `~/.config/omarchy/widgets.json` where it is, and the new install reads it
-> back.
 
 ---
 
