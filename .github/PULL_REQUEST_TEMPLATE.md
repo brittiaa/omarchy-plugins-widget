@@ -31,7 +31,7 @@ No.
 - [ ] Colours from `Color.*` only, sizes from `unit`/`width`/`height`
 - [ ] Draws no background or border of its own; no `MouseArea`; no animation
 - [ ] `type` and `settings` keys are names I am happy to keep forever
-- [ ] Logic with a right answer is in `Model.js`, with a test
-- [ ] `node --test tests/` passes
+- [ ] Logic with a right answer is in `model/`, with a test
+- [ ] `npm run check` passes (tests, manifest, qmllint)
 - [ ] `omarchy plugin validate .` passes
 - [ ] I have read [DESIGN.md](../DESIGN.md)

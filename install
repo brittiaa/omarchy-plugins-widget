@@ -29,7 +29,7 @@
 #
 # From a terminal, after `omarchy plugin add` has put this file on your disk:
 #
-#   ~/.config/omarchy/plugins/anishfn.widgets/install --yes
+#   ~/.config/omarchy/plugins/brittiaa.widgets/install --yes
 #
 # Two things this script will not do, for the same reason. It is not offered
 # as a one-liner that streams this file from a branch into a shell, and it
@@ -42,8 +42,8 @@
 
 set -uo pipefail
 
-ID="anishfn.widgets"
-URL="https://github.com/anishfn/omarchy-widgets.git"
+ID="brittiaa.widgets"
+URL="https://github.com/brittiaa/omarchy-plugins-widget.git"
 PLUGINS_DIR="$HOME/.config/omarchy/plugins"
 
 # Plugins this one talks to, and what you lose without each. Nothing here is
@@ -247,5 +247,5 @@ done
 cat <<'NEXT'
 
   Click Widgets in the bar to choose what is on screen.
-  Update later with:  ~/.config/omarchy/plugins/anishfn.widgets/update
+  Update later with:  ~/.config/omarchy/plugins/brittiaa.widgets/update
 NEXT

@@ -19,11 +19,20 @@ Item {
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string configPath: home + "/.config/omarchy/widgets.json"
+  // The directory where user-installed Omarchy plugins live.
+  readonly property string pluginsDir: home + "/.config/omarchy/plugins"
+  // The plugins Omarchy ships. Scanned after the user's, so an installed plugin
+  // with the same id shadows the shipped one.
+  readonly property string systemPluginsDir: "/usr/share/omarchy/shell/plugins"
 
   // ------------------------------------------------------------------ state
 
   property var config: Model.defaultConfig()
   property bool configLoaded: false
+  // The catalogue entries built from discovered plugin manifests, as the last
+  // scan left them. Read by the inspector to say which plugin a card came from;
+  // the catalogue itself lives in Model's shared scope. See the scan below.
+  property var pluginEntries: []
 
   // The text we last wrote ourselves. `watchChanges` cannot tell our own
   // write from an editor's, and reloading our own bytes would clobber a
@@ -135,6 +144,22 @@ Item {
   function setColumns(columns) { apply(Model.setColumns(config, columns)) }
 
   function setScale(scale) { apply(Model.setScale(config, scale)) }
+
+  // Whether the grid gets out of the way while a window is in front of it.
+  function setHideWhenWindows(on) { apply(Model.setHideWhenWindows(config, on)) }
+  function setAnimStyle(style) { apply(Model.setAnimStyle(config, style)) }
+  function setAnimDuration(ms) { apply(Model.setAnimDuration(config, ms)) }
+  // One side of the space around an embedded plugin panel inside its card.
+  function setPadding(side, px) { apply(Model.setPadding(config, side, px)) }
+  // Whether that space follows the theme's popup padding instead.
+  function setPaddingTheme(on) { apply(Model.setPaddingTheme(config, on)) }
+
+  // One card's own padding, max height (rows) and panel alignment.
+  function setCardPadding(id, side, px) { apply(Model.setCardPadding(config, id, side, px)) }
+  function clearCardPadding(id) { apply(Model.clearCardPadding(config, id)) }
+  function setMaxRows(id, rows) { apply(Model.setMaxRows(config, id, rows)) }
+  function setAlign(id, align) { apply(Model.setAlign(config, id, align)) }
+  function setContentScale(id, scale) { apply(Model.setContentScale(config, id, scale)) }
 
   // The layout's global opacity, applied to every card: moving it writes over
   // any card that had its own.
@@ -295,7 +320,14 @@ Item {
     zoneListProc.running = true
   }
 
-  onEditingChanged: if (service.editing) service.loadTimezones()
+  onEditingChanged: {
+    if (!service.editing) return
+    service.loadTimezones()
+    // Opening the editor is the moment someone is about to look at the list of
+    // what they could add, which makes it the moment worth checking whether
+    // they have installed something since the shell started. One process.
+    service.scanPlugins()
+  }
 
   Process {
     id: zoneListProc
@@ -1193,6 +1225,159 @@ Item {
     }
   }
 
+  // -------------------------------------------------- plugin catalogue scan
+  //
+  // Most of the catalogue is not in this repo. Every manifest.json under
+  // ~/.config/omarchy/plugins is read, the ones that describe something we can
+  // mount become catalogue entries, and Model.setCatalogExtension() puts them
+  // in front of the built-in ones. ensureCatalogCoverage() then adds each newly
+  // discovered type to the config switched off, which is what puts it on the
+  // bar's list without putting it on the wallpaper.
+  //
+  // Only `entryPoints.barWidget` is ever mounted, and the manifest's `kinds` is
+  // not consulted. Two reasons, both learned from the manifests actually
+  // installed on a machine:
+  //
+  //   - A bar widget's QML extends qs.Ui.BarWidget, which is a plain Item, and
+  //     an Item is the one thing a card can hold. A panel's QML extends
+  //     qs.Ui.Panel, which owns a PanelController and is a floating surface of
+  //     its own; loading one inside a card does not embed it, it detaches it.
+  //   - The entry point's *file* says nothing about its kind. robzolkos.github
+  //     declares `kinds: ["bar-widget"]` with `entryPoints.barWidget` pointing
+  //     at "Panel.qml", and io.github.ilyazar.keyboard-layout points its at
+  //     "KeyboardLayout.qml". The key is the contract; the filename is a name.
+  //
+  // So a plugin that is only a service, or only a panel, has nothing here to
+  // mount and is passed over in silence -- it is not broken, it is just not a
+  // thing that can sit on a wallpaper.
+
+  // The entries built from the last scan. Held as a QML property rather than
+  // only in Model's scope because a JavaScript assignment invalidates no
+  // binding: QML has no way to know the catalogue changed unless something it
+  // is watching changes with it. `catalogRevision` is what bindings that read
+  // the catalogue depend on.
+  property int catalogRevision: 0
+  property bool scanningPlugins: false
+
+  // This plugin does not host itself. Taken from the manifest the shell injects
+  // rather than written out, so a fork under a different id still skips itself.
+  readonly property string ownPluginId: manifest && manifest.id
+    ? String(manifest.id) : "brittiaa.widgets"
+
+  function scanPlugins() {
+    if (service.scanningPlugins) return
+    service.scanningPlugins = true
+    pluginScanProc.running = true
+  }
+
+  // One process for the whole scan, emitting every manifest in one payload:
+  // a record per plugin, each one a path line followed by the manifest as a
+  // single line of JSON, records separated by \x1e.
+  //
+  // One process rather than a directory listing followed by a read per file:
+  // the reads are the slow part, a FileView cannot be reused for a sequence of
+  // paths without toggling `active` and hoping onLoaded fires again, and there
+  // is nothing here worth the bookkeeping. `jq -c` is what flattens a manifest
+  // onto one line; a manifest it cannot parse becomes `{}` and is dropped
+  // below rather than taking the rest of the scan down with it.
+  Process {
+    id: pluginScanProc
+    running: false
+    // `find -L` follows symlinks, which is what makes a plugin installed with
+    // `omarchy dev link` visible: that puts a symlink to a working tree in the
+    // plugins directory, and without -L find does not descend it, so the
+    // plugin a developer is actually working on would be the one plugin this
+    // never finds. -maxdepth bounds the walk, so a symlink loop cannot run
+    // away with it.
+    command: ["/usr/bin/bash", "-c",
+      'find -L "$1" "$2" -mindepth 2 -maxdepth 2 -name manifest.json -print0 2>/dev/null' +
+      ' | while IFS= read -r -d "" f; do' +
+      '     printf "%s\\n" "$f";' +
+      '     jq -c . "$f" 2>/dev/null || printf "{}\\n";' +
+      '     printf "\\036";' +
+      '   done',
+      "bash", service.pluginsDir, service.systemPluginsDir]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: service._applyScan(String(text || ""))
+    }
+    // A scan that fails to produce output still has to end, or scanPlugins()
+    // would refuse every later attempt.
+    onExited: if (service.scanningPlugins) service._applyScan("")
+  }
+
+  // Has a scan ever finished? The config must not be parsed before one has:
+  // normalization drops a widget whose type is not in the catalogue, so a config
+  // read before the plugins are known loses every plugin widget in it -- and
+  // then saves that back over the file. See the config load below.
+  property bool pluginsScanned: false
+
+  function _applyScan(payload) {
+    var entries = []
+    var seen = {}
+    var records = payload.split("\u001e")
+
+    for (var i = 0; i < records.length; i++) {
+      var record = records[i].replace(/^\n+/, "")
+      if (!record) continue
+      var cut = record.indexOf("\n")
+      if (cut === -1) continue
+
+      var path = record.slice(0, cut)
+      var json = record.slice(cut + 1)
+      if (!path) continue
+
+      var entry = service._entryFromManifest(path, json)
+      if (!entry || seen[entry.type]) continue
+      seen[entry.type] = true
+      entries.push(entry)
+    }
+
+    service.scanningPlugins = false
+    service.pluginEntries = entries
+    Model.setCatalogExtension(entries)
+    service.catalogRevision++
+
+    // The first scan is what unblocks reading the config. Everything the file
+    // could name is in the catalogue now, so nothing in it will be mistaken for
+    // a type that does not exist.
+    if (!service.pluginsScanned) {
+      service.pluginsScanned = true
+      configFile.reload()
+      return
+    }
+
+    // A type discovered since is a type the list has to offer. Saved only when
+    // the file would actually change, so a scan that found nothing new is not
+    // a write.
+    if (service.configLoaded) {
+      service.config = Model.ensureCatalogCoverage(service.config)
+      if (service.serialize() !== service.lastWrittenText) saveTimer.restart()
+    }
+  }
+
+  // One record into a catalogue entry, or null for anything we cannot mount.
+  function _entryFromManifest(path, json) {
+    var parsed = null
+    try {
+      parsed = JSON.parse(json)
+    } catch (e) {
+      console.warn("widgets: unreadable plugin manifest at", path)
+      return null
+    }
+
+    if (!Model.isPlainObject(parsed) || !parsed.id) return null
+    if (String(parsed.id) === service.ownPluginId) return null
+
+    var ep = Model.isPlainObject(parsed.entryPoints) ? parsed.entryPoints : {}
+    if (!ep.barWidget) return null
+
+    // Resolved against the manifest's own directory: the manifest is the only
+    // thing that knows where the plugin lives.
+    var dir = path.replace(/\/[^\/]+$/, "")
+    return Model.buildPluginCatalogEntry(parsed, "barWidget", "file://" + dir + "/" + String(ep.barWidget))
+  }
+
   // ----------------------------------------------------------------- IPC
 
   IpcHandler {
@@ -1508,11 +1693,26 @@ Item {
       return out.join("\n")
     }
 
+    function rescanPlugins(): string {
+      service.scanPlugins()
+      return "ok"
+    }
+
     function reload(): string {
       configFile.reload()
       return "ok"
     }
   }
 
-  Component.onCompleted: configFile.reload()
+  // The scan comes first and the config is read when it finishes, because a
+  // widget whose type is not in the catalogue is not a widget: normalization
+  // drops it. Read the file before the plugins are known and every plugin
+  // widget in it is dropped, re-added switched off by ensureCatalogCoverage,
+  // and written back -- the user's choice of plugin cards silently reset on
+  // every shell start, which is the kind of bug that gets blamed on the plugin
+  // that was being displayed rather than on the one doing the displaying.
+  //
+  // `_applyScan` runs even when the scan process fails or finds nothing, so
+  // there is no path on which the config is never read.
+  Component.onCompleted: service.scanPlugins()
 }

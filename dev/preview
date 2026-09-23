@@ -56,8 +56,19 @@ ShellRoot {
   // Stands in for the shell object the plugin is handed. Surface asks it for
   // serviceFor(), and for a bar to forward popup summons to — there is no bar
   // here, so that path stays null and the desktop surface is all you get.
+  //
+  // Only this plugin's own service exists in the harness, and every other id
+  // gets null, the way the real shell answers for a plugin whose service it has
+  // not loaded. That matters now that a card can be somebody else's plugin: a
+  // third-party widget asks bar.shell.serviceFor() for its own id, and handing
+  // it this one instead makes it read our properties off
+  // the wrong object and fill the log with failures it would never have in the
+  // shell. A plugin whose service is missing draws its own "starting" state,
+  // which is the honest thing to show in a harness that has not got one.
   property var shellStub: QtObject {
-    function serviceFor(id) { return harness.serviceItem }
+    function serviceFor(id) {
+      return String(id) === "brittiaa.widgets" ? harness.serviceItem : null
+    }
   }
 
   Loader {

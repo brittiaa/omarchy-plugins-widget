@@ -128,6 +128,29 @@ Column {
     onTextEdited: root.committed(text)
   }
 
+  // A number, which only a discovered plugin has: nothing this repo ships
+  // declares one. A manifest's "integer" is bridged to this kind, and its
+  // `min`, `max` and `step` are exactly what a spinbox wants, so it gets the
+  // same control the editor uses for the grid's own numbers rather than a text
+  // field that has to be told what a number looks like.
+  NumberField {
+    visible: root.kind === "number"
+    width: root.width
+    label: ""
+    value: Number(root.value) || 0
+    // A manifest that gives no range still has to have one, or the field could
+    // be spun past anything the plugin could mean by it.
+    from: root.spec && root.spec.min !== undefined ? Math.round(Number(root.spec.min)) : -1000000
+    to: root.spec && root.spec.max !== undefined ? Math.round(Number(root.spec.max)) : 1000000
+    stepSize: root.spec && root.spec.step !== undefined ? Math.round(Number(root.spec.step)) : 1
+    fieldWidth: Style.space(76)
+    foreground: root.foreground
+    accent: root.accent
+    fontFamily: root.fontFamily
+    fontSize: Style.font.bodySmall
+    onModified: function(v) { root.committed(Number(v)) }
+  }
+
   PickerField {
     visible: root.kind === "choice"
     width: root.width

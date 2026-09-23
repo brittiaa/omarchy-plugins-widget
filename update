@@ -27,7 +27,7 @@
 
 set -uo pipefail
 
-ID="anishfn.widgets"
+ID="brittiaa.widgets"
 PLUGINS_DIR="$HOME/.config/omarchy/plugins"
 
 # Named so the run can end by saying where each one is. Nothing here is ever
@@ -54,7 +54,7 @@ done
 
 command -v omarchy >/dev/null 2>&1 || fail "omarchy not found."
 [[ -d "$PLUGINS_DIR/$ID" ]] ||
-  fail "$ID is not installed. Install it with: omarchy plugin add https://github.com/anishfn/omarchy-widgets.git"
+  fail "$ID is not installed. Install it with: omarchy plugin add https://github.com/brittiaa/omarchy-plugins-widget.git"
 
 head_of()    { git -C "$PLUGINS_DIR/$1" rev-parse --short HEAD 2>/dev/null; }
 version_of() { jq -r '.version // "?"' "$PLUGINS_DIR/$1/manifest.json" 2>/dev/null || echo "?"; }

@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
+import "../Model.js" as Model
 
 // The layout editor. One interactive overlay per output, drawn over the grid
 // the desktop uses, showing the real widget cards in their real places.
@@ -41,9 +41,21 @@ Item {
 
   function select(id) { if (service) service.select(id) }
 
+  // Bumped by the service after every plugin scan. Read by `sourceFor` so a
+  // binding that calls it is re-evaluated when the catalogue changes: the
+  // catalogue lives in Model's shared scope, and a JavaScript assignment there
+  // invalidates no QML binding on its own.
+  readonly property int catalogRevision: service ? service.catalogRevision : 0
+
   function sourceFor(type) {
+    var revision = root.catalogRevision   // a dependency, not a value
     var entry = Model.catalogEntry(type)
-    return entry ? Qt.resolvedUrl(entry.source) : ""
+    if (!entry) return ""
+    // A discovered plugin carries the absolute file:// URL the scan resolved
+    // against its own directory; a built-in carries a path relative to this
+    // file, which is where Qt.resolvedUrl looks.
+    if (entry.sourceUrl) return entry.sourceUrl
+    return entry.source ? Qt.resolvedUrl("../" + entry.source) : ""
   }
 
   function nameFor(instance) { return Model.displayName(config, instance) }
@@ -75,6 +87,20 @@ Item {
           ? Model.widgetsForScreen(root.config, win.screenName)
           : []
         readonly property var tray: root.config ? Model.offWidgets(root.config) : []
+
+        // Cards grown to their content, as on the desktop (see Surface.qml),
+        // so what you arrange here is the size it will be there.
+        property var naturalHeights: ({})
+        function setNaturalHeight(id, h) {
+          if ((win.naturalHeights[id] || 0) === h) return
+          var next = Object.assign({}, win.naturalHeights)
+          next[id] = h
+          win.naturalHeights = next
+        }
+        readonly property var rects: Model.flowRects(root.layout, win.placed,
+          win.width, win.naturalHeights)
+        // The same, for the grid a drop would leave, while a drag is over one.
+        property var previewRects: null
 
         screen: modelData
         color: "transparent"
@@ -144,14 +170,14 @@ Item {
         property var dropPreview: null
 
         // Where a widget sits while a drag is in progress. The one in hand
-        // keeps its old cell and fades, so the grid still shows where it came
-        // from; everything else slides to wherever the drop would put it.
-        function previewInstance(instance) {
-          if (!instance) return instance
-          if (!win.dragging || !win.dropPreview) return instance
-          if (instance.id === win.dragId) return instance
-          var moved = Model.findInstance(win.dropPreview, instance.id)
-          return moved ? moved : instance
+        // keeps its old place and fades, so the grid still shows where it came
+        // from; everything else slides to wherever the drop would put it,
+        // content heights and all.
+        function rectFor(instance) {
+          var id = instance.id
+          var from = win.dropPreview && win.previewRects && id !== win.dragId
+            ? win.previewRects : win.rects
+          return from[id] || Model.widgetRect(root.layout, instance, win.width)
         }
 
         function startDrag(instance, localGrabX, localGrabY, px, py) {
@@ -179,18 +205,28 @@ Item {
             win.hoverCell = null
             win.dropValid = false
             win.dropPreview = null
+            win.previewRects = null
             return
           }
 
           // Both the cell and whether it is a legal one come from Model, so
           // the highlight the user sees and the drop that follows cannot
           // disagree — they are one answer, asked once.
+          //
+          // Measured with every card at the height its content gives it, and
+          // refused if it would push a card further off the bottom of the
+          // screen than it already is.
           var target = root.config
-            ? Model.dropTarget(root.config, win.dragId, win.ghostX, win.ghostY, win.width)
-            : { cell: null, valid: false, preview: null }
+            ? Model.dropTarget(root.config, win.dragId, win.ghostX, win.ghostY, win.width, {
+                screenName: win.screenName,
+                heights: win.naturalHeights,
+                maxBottom: win.height - root.layout.marginY
+              })
+            : { cell: null, valid: false, preview: null, rects: null }
           win.hoverCell = target.cell
           win.dropValid = target.valid
           win.dropPreview = target.valid ? target.preview : null
+          win.previewRects = target.rects
         }
 
         function dragMove(px, py) {
@@ -218,6 +254,7 @@ Item {
           win.hoverCell = null
           win.dropValid = false
           win.dropPreview = null
+          win.previewRects = null
           win.overTray = false
           win.overChrome = false
         }
@@ -261,8 +298,20 @@ Item {
         // ------------------------------------------------------- the grid
 
         // One row past what is used, so there is always somewhere new to drop.
-        readonly property int gridRows: Math.min(Model.MAX_ROWS,
-          (root.config ? Model.usedRows(root.config) : 0) + 1)
+        //
+        // Never more rows than fit above the tray and the toolbar. A widget
+        // already lower than that keeps its rows, so it is not hidden by the
+        // editor.
+        readonly property int gridRows: {
+          var used = root.config ? Model.usedRows(root.config) : 0
+          return Math.min(Model.MAX_ROWS,
+            Math.max(used, Math.min(used + 1, Model.rowsThatFit(root.layout, win.height - bottomChrome))))
+        }
+
+        // What the tray and the toolbar take from the bottom of the screen.
+        // Cells drawn under them can be seen and not dropped on.
+        readonly property real bottomChrome: chrome.anchors.bottomMargin + toolbar.height
+          + (trayPanel.visible ? trayPanel.height + chrome.spacing : 0)
 
         // Both grids, always. The other side is drawn even when nothing is on
         // it, because that is the only way anyone finds out it is there --
@@ -309,10 +358,14 @@ Item {
         // than by nothing appearing to change.
         Rectangle {
           visible: win.dragging && win.hoverCell !== null
-          readonly property var rect: win.hoverCell
-            ? Model.cellRect(root.layout, win.width, win.hoverCell.col, win.hoverCell.row,
-                win.dragCols, win.dragRows, win.hoverCell.side)
-            : ({ x: 0, y: 0, width: 0, height: 0 })
+          // Where the card would really end up: pushed down and grown as the
+          // drop would leave it, which is not always the cell under the ghost.
+          readonly property var rect: {
+            if (!win.hoverCell) return { x: 0, y: 0, width: 0, height: 0 }
+            if (win.previewRects && win.previewRects[win.dragId]) return win.previewRects[win.dragId]
+            return Model.cellRect(root.layout, win.width, win.hoverCell.col, win.hoverCell.row,
+              win.dragCols, win.dragRows, win.hoverCell.side)
+          }
           x: rect.x
           y: rect.y
           width: rect.width
@@ -337,8 +390,7 @@ Item {
             // config throughout, so only x and y re-evaluate as the pointer
             // moves -- rebuilding the delegates would tear every card down
             // and build it again on every mouse move.
-            readonly property var rect: Model.widgetRect(root.layout,
-              win.previewInstance(modelData), win.width)
+            readonly property var rect: win.rectFor(modelData)
             readonly property bool isDragged: win.dragging && win.dragId === modelData.id
             readonly property bool isSelected: root.selectedId === modelData.id
 
@@ -357,13 +409,21 @@ Item {
             // making room. Short enough to be over before you have let go.
             Behavior on x { enabled: !slot.isDragged; NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
             Behavior on y { enabled: !slot.isDragged; NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+            // Growing to its content follows the layout's animation setting,
+            // as it does on the desktop.
+            Behavior on height {
+              enabled: root.layout.animStyle !== "none" && root.layout.animDuration > 0
+              NumberAnimation { duration: root.layout.animDuration; easing.type: Easing.OutCubic }
+            }
 
             WidgetInstance {
               anchors.fill: parent
+              onNaturalHeightChanged: win.setNaturalHeight(slot.modelData.id, naturalHeight)
               service: root.service
               shell: root.shell
               instance: slot.modelData
               widgetSource: root.sourceFor(slot.modelData.type)
+              isPlugin: Model.isPluginType(slot.modelData.type)
             }
 
             Rectangle {
@@ -501,8 +561,7 @@ Item {
             id: trayPanel
             anchors.horizontalCenter: parent.horizontalCenter
             visible: win.tray.length > 0
-            width: Math.min(win.width - Style.space(40),
-              trayRow.implicitWidth + Style.space(28))
+            width: win.width - Style.space(40)
             height: trayRow.implicitHeight + Style.space(16)
             radius: Style.cornerRadius > 0 ? Style.cornerRadius : 0
             color: Color.popups.background
@@ -528,13 +587,18 @@ Item {
               onClicked: {}
             }
 
-            Row {
+            // Wraps rather than scrolls: with every installed plugin on offer
+            // the tray is dozens of chips, and a single row runs off both
+            // edges of the screen with the ends out of reach.
+            Flow {
               id: trayRow
               anchors.centerIn: parent
+              width: parent.width - Style.space(28)
               spacing: Style.space(8)
 
               Text {
-                anchors.verticalCenter: parent.verticalCenter
+                height: Style.space(30)
+                verticalAlignment: Text.AlignVCenter
                 text: "Off"
                 textFormat: Text.PlainText
                 color: root.dim
@@ -626,13 +690,16 @@ Item {
 
           // --------------------------------------------------------- the bar
           //
-          // The grid, and nothing else: which side it hugs, how wide it is, how
-          // big, how transparent and how rounded its cards are. Five controls,
-          // each with its name above it rather than beside it, so the names read
-          // as one row and the controls as another.
+          // The grid, and nothing else, in three groups picked at the start of
+          // the row: where it is (side, columns, scale), how its cards look
+          // (opacity, radius, padding) and how it moves. Each control has its
+          // name above it rather than beside it, so the names read as one row
+          // and the controls as another.
 
           BorderSurface {
             id: toolbar
+            // Which group of settings the bar is showing.
+            property string section: "grid"
             anchors.horizontalCenter: parent.horizontalCenter
             width: Math.min(win.width - Style.space(40),
               barColumn.implicitWidth + Style.space(36))
@@ -660,8 +727,32 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: Style.space(16)
 
+                // Three groups, one showing at a time, so the bar stays one
+                // short row however many knobs the grid grows: where the grid
+                // is, what its cards look like, and how it moves.
+                ButtonGroup {
+                  anchors.bottom: parent.bottom
+                  options: [{ value: "grid", label: "Grid" }, { value: "look", label: "Look" }, { value: "motion", label: "Motion" }]
+                  value: toolbar.section
+                  foreground: root.foreground
+                  accent: root.accent
+                  fontFamily: root.fontFamily
+                  focusable: false
+                  onChanged: function(v) { toolbar.section = v }
+                }
+
+                PanelSeparator {
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: Style.space(4)
+                  width: 1
+                  height: Style.space(24)
+                  foreground: root.foreground
+                  strength: 0.25
+                }
+
                 Field {
                   anchors.bottom: parent.bottom
+                  visible: toolbar.section === "grid"
                   label: "Side"
                   foreground: root.foreground
                   fontFamily: root.fontFamily
@@ -677,21 +768,13 @@ Item {
                   }
                 }
 
-                PanelSeparator {
-                  anchors.bottom: parent.bottom
-                  anchors.bottomMargin: Style.space(4)
-                  width: 1
-                  height: Style.space(24)
-                  foreground: root.foreground
-                  strength: 0.25
-                }
-
                 // Only the counts that actually fit this screen are offered. A
                 // grid wider than the display would put widgets somewhere you
                 // cannot look at them, and the count is measured against this
                 // window, which is already the usable area minus the bar.
                 Field {
                   anchors.bottom: parent.bottom
+                  visible: toolbar.section === "grid"
                   label: "Columns"
                   foreground: root.foreground
                   fontFamily: root.fontFamily
@@ -713,21 +796,13 @@ Item {
                   }
                 }
 
-                PanelSeparator {
-                  anchors.bottom: parent.bottom
-                  anchors.bottomMargin: Style.space(4)
-                  width: 1
-                  height: Style.space(24)
-                  foreground: root.foreground
-                  strength: 0.25
-                }
-
                 // One field, in percent, set at 100: any whole number from 25
                 // to 200, typecast by the spinbox and written back as the
                 // factor. The floor is Model.MIN_SCALE, because a grid scaled
                 // to nothing cannot be clicked back.
                 Field {
                   anchors.bottom: parent.bottom
+                  visible: toolbar.section === "grid"
                   label: "Scale"
                   foreground: root.foreground
                   fontFamily: root.fontFamily
@@ -750,6 +825,7 @@ Item {
                 // any card's own opacity, so the whole grid matches again.
                 Field {
                   anchors.bottom: parent.bottom
+                  visible: toolbar.section === "look"
                   label: "Opacity"
                   foreground: root.foreground
                   fontFamily: root.fontFamily
@@ -768,19 +844,11 @@ Item {
                   }
                 }
 
-                PanelSeparator {
-                  anchors.bottom: parent.bottom
-                  anchors.bottomMargin: Style.space(4)
-                  width: 1
-                  height: Style.space(24)
-                  foreground: root.foreground
-                  strength: 0.25
-                }
-
                 // The whole grid's corner rounding, in pixels. Moving it writes
                 // over any card's own radius, so the whole grid rounds again.
                 Field {
                   anchors.bottom: parent.bottom
+                  visible: toolbar.section === "look"
                   label: "Radius"
                   foreground: root.foreground
                   fontFamily: root.fontFamily
@@ -796,6 +864,115 @@ Item {
                     accent: root.accent
                     fontFamily: root.fontFamily
                     onModified: function(v) { if (root.service) root.service.setLayoutRadius(Number(v)) }
+                  }
+                }
+
+                // Space around an embedded plugin panel inside its card: the
+                // theme's popup padding, or one field a side in CSS order.
+                Field {
+                  anchors.bottom: parent.bottom
+                  visible: toolbar.section === "look"
+                  label: "Padding"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+
+                  Row {
+                    spacing: Style.space(4)
+
+                    ButtonGroup {
+                      options: [{ value: "theme", label: "Theme" }, { value: "custom", label: "Custom" }]
+                      value: root.layout.paddingTheme === true ? "theme" : "custom"
+                      foreground: root.foreground
+                      accent: root.accent
+                      fontFamily: root.fontFamily
+                      focusable: false
+                      onChanged: function(v) {
+                        if (root.service) root.service.setPaddingTheme(v === "theme")
+                      }
+                    }
+
+                    // The four sides are only asked for when they are used.
+                    Repeater {
+                      model: root.layout.paddingTheme === true ? [] : Model.PADDING_SIDES
+                      delegate: NumberField {
+                        required property string modelData
+                        label: ""
+                        value: Math.round(root.layout.padding[modelData])
+                        from: 0
+                        to: Math.round(Model.MAX_PADDING)
+                        stepSize: 2
+                        fieldWidth: Style.space(60)
+                        foreground: root.foreground
+                        accent: root.accent
+                        fontFamily: root.fontFamily
+                        onModified: function(v) { if (root.service) root.service.setPadding(modelData, Number(v)) }
+                      }
+                    }
+                  }
+                }
+
+                // Whether the grid leaves the screen while a window is in
+                // front of it. Named for what you see rather than for what it
+                // does: "hide when a window is open" is a description of the
+                // mechanism, and "Windows" beside On and Off is a description
+                // of nothing, so the label says what the grid does.
+                Field {
+                  anchors.bottom: parent.bottom
+                  visible: toolbar.section === "motion"
+                  label: "Hide behind windows"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+
+                  ButtonGroup {
+                    options: [{ value: "off", label: "Off" }, { value: "on", label: "On" }]
+                    value: root.layout.hideWhenWindows === false ? "off" : "on"
+                    foreground: root.foreground
+                    accent: root.accent
+                    fontFamily: root.fontFamily
+                    focusable: false
+                    onChanged: function(v) {
+                      if (root.service) root.service.setHideWhenWindows(v === "on")
+                    }
+                  }
+                }
+
+                Field {
+                  anchors.bottom: parent.bottom
+                  visible: toolbar.section === "motion"
+                  label: "Animation"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+
+                  ButtonGroup {
+                    options: [{ value: "none", label: "Off" }, { value: "fade", label: "Fade" }, { value: "slide", label: "Slide" }, { value: "scale", label: "Scale" }]
+                    value: root.layout.animStyle
+                    foreground: root.foreground
+                    accent: root.accent
+                    fontFamily: root.fontFamily
+                    focusable: false
+                    onChanged: function(v) {
+                      if (root.service) root.service.setAnimStyle(v)
+                    }
+                  }
+                }
+
+                Field {
+                  anchors.bottom: parent.bottom
+                  visible: toolbar.section === "motion"
+                  label: "Speed"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+
+                  ButtonGroup {
+                    options: [{ value: "120", label: "Fast" }, { value: "220", label: "Normal" }, { value: "400", label: "Slow" }]
+                    value: String(root.layout.animDuration)
+                    foreground: root.foreground
+                    accent: root.accent
+                    fontFamily: root.fontFamily
+                    focusable: false
+                    onChanged: function(v) {
+                      if (root.service) root.service.setAnimDuration(Number(v))
+                    }
                   }
                 }
 
@@ -886,6 +1063,10 @@ Item {
             widgetSource: {
               var inst = win.dragging && root.config ? Model.findInstance(root.config, win.dragId) : null
               return inst ? root.sourceFor(inst.type) : ""
+            }
+            isPlugin: {
+              var inst2 = win.dragging && root.config ? Model.findInstance(root.config, win.dragId) : null
+              return inst2 ? Model.isPluginType(inst2.type) : false
             }
           }
         }

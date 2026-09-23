@@ -3,10 +3,57 @@ const assert = require("node:assert/strict")
 const fs = require("node:fs")
 const path = require("node:path")
 const { spawnSync } = require("node:child_process")
-const Model = require("../Model.js")
 
 const root = path.join(__dirname, "..")
 const read = (f) => fs.readFileSync(path.join(root, f), "utf8")
+
+// Model.js and everything under model/ open with `.pragma library`, and pull
+// each other in with `.import "X.js" as X`. Those are QML directives and not
+// JavaScript, so `require` cannot parse them; this is a small module loader
+// that does what the QML engine does instead. Each file is evaluated once,
+// its `.import` lines become parameters bound to the imported module, and
+// every top-level `function` and `var` is exposed as a property -- which is
+// what a QML JavaScript library exports.
+//
+// Evaluated with `new Function` rather than in a `vm` context on purpose: a vm
+// context is a separate realm, so an array the model built there would have a
+// different Array.prototype and `assert.deepEqual` would reject every size and
+// every rect for a prototype mismatch rather than for its contents.
+const loaded = new Map()
+
+function loadModule(file) {
+  if (loaded.has(file)) return loaded.get(file)
+  const imports = []
+  const src = read(file)
+    .replace(/^\s*\.pragma\b[^\n]*$/gm, "")
+    .replace(/^\s*\.import\s+"([^"]+)"\s+as\s+(\w+)\s*$/gm, (_, rel, as) => {
+      imports.push([as, path.posix.normalize(path.posix.join(path.posix.dirname(file), rel))])
+      return ""
+    })
+  const names = [...src.matchAll(/^(?:function|var)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1])
+  const exposed = names.map((n) => `get ${n}() { return ${n} }`).join(",\n")
+  const body = `${src}\nreturn {\n${exposed}\n}`
+  const mod = new Function(...imports.map(([as]) => as), body)(...imports.map(([, f]) => loadModule(f)))
+  loaded.set(file, mod)
+  return mod
+}
+
+function loadModel() {
+  return loadModule("Model.js")
+}
+
+const Model = loadModel()
+
+// A config with one clock on it, which is what `defaultConfig()` used to hand
+// back before the default became an empty grid. The tests below that are about
+// what happens to a widget, rather than about what a fresh install looks like,
+// need a widget to be about: this is the shortest way to say so.
+//
+// `nextInstanceId` gives the first of a type the bare type name, so the clock
+// here is addressable as "clock", the way it was when it came seeded.
+function clockConfig() {
+  return Model.addWidget(Model.defaultConfig(), "clock")
+}
 
 function qmlFiles() {
   const out = []
@@ -413,7 +460,7 @@ test("a timezone that could reach a command line is refused as a setting too", (
 })
 
 test("setting a value goes through the same gate as loading one", () => {
-  let config = Model.defaultConfig()
+  let config = clockConfig()
   config = Model.setSetting(config, "clock", "timezone", "Asia/Tokyo")
   assert.equal(Model.findInstance(config, "clock").settings.timezone, "Asia/Tokyo")
 
@@ -438,15 +485,204 @@ test("a zone names itself when the user has not", () => {
 
 // ------------------------------------------------------------------ config
 
-test("the default config is one clock, on, in a two-column grid", () => {
+test("the default config is an empty two-column grid on the right", () => {
   const config = Model.defaultConfig()
   assert.equal(config.version, Model.SCHEMA_VERSION)
   assert.equal(config.layout.columns, 2)
   assert.equal(config.layout.side, "right")
-  assert.equal(config.widgets.length, 1)
-  assert.equal(config.widgets[0].type, "clock")
-  assert.equal(config.widgets[0].enabled, true)
-  assert.deepEqual([config.widgets[0].col, config.widgets[0].row], [0, 0])
+  // Nothing is chosen for anybody. What belongs on a wallpaper is not
+  // guessable, least of all from a catalogue that is mostly whichever Omarchy
+  // plugins happen to be installed.
+  assert.deepEqual(config.widgets, [])
+})
+
+test("a fresh install offers every type, switched off, and draws none of them", () => {
+  const covered = Model.ensureCatalogCoverage(Model.defaultConfig())
+  assert.equal(covered.widgets.length, Model.catalogTypes().length)
+  for (const w of covered.widgets) assert.equal(w.enabled, false, `${w.type} should arrive off`)
+  // Which is what the desktop reads: a list to choose from, and an empty screen.
+  assert.deepEqual(Model.widgetsForScreen(covered, "DP-1"), [])
+})
+
+// ------------------------------------------------------- discovered plugins
+//
+// The catalogue is not only what this repo ships. Service.qml scans
+// ~/.config/omarchy/plugins for manifests, turns the ones it can mount into
+// catalogue entries, and hands them to setCatalogExtension. From there on they
+// are ordinary entries: the tests below are about the conversion, and about the
+// entries behaving like any other once converted.
+//
+// The manifests quoted here are trimmed copies of real ones, so that a change
+// in what Omarchy plugins actually look like shows up as a failure here.
+
+const SPOTIFY_MANIFEST = {
+  schemaVersion: 1,
+  id: "quickshell.spotify",
+  name: "Omarchy Spotify",
+  version: "1.0.4",
+  author: "QuickshellSpotify",
+  description: "Spotify in Quickshell.",
+  kinds: ["service", "bar-widget", "panel"],
+  entryPoints: { service: "Service.qml", barWidget: "BarWidget.qml", panel: "Panel.qml" },
+  barWidget: {
+    displayName: "Omarchy Spotify",
+    allowMultiple: false,
+    defaults: { deviceName: "Omarchy Spotify", idleShutdownMinutes: 15, showLyrics: "On" },
+    schema: [
+      { key: "deviceName", type: "string", label: "This computer appears as",
+        defaultValue: "Omarchy Spotify", description: "Shown in Devices immediately." },
+      { key: "idleShutdownMinutes", type: "integer", label: "Shut down after", min: 5, max: 120, step: 5 },
+      { key: "showLyrics", type: "enum", label: "Lyrics", options: ["On", "Off"] }
+    ]
+  }
+}
+
+// A real shape, from io.github.ilyazar.keyboard-layout: a barWidget with no
+// schema at all.
+const KEYBOARD_MANIFEST = {
+  schemaVersion: 1,
+  id: "io.github.ilyazar.keyboard-layout",
+  name: "Keyboard Layout Pulse",
+  version: "0.2.2",
+  author: "ilyaZar",
+  kinds: ["bar-widget", "service"],
+  entryPoints: { barWidget: "KeyboardLayout.qml", service: "Service.qml" },
+  barWidget: { displayName: "Keyboard Layout Pulse", allowMultiple: false }
+}
+
+function pluginEntry(manifest, url) {
+  return Model.buildPluginCatalogEntry(manifest, "barWidget", url || "file:///x/BarWidget.qml")
+}
+
+// Every test here leaves the catalogue as it found it, or the ones after it
+// would be reading somebody else's plugins.
+function withPlugins(entries, body) {
+  Model.setCatalogExtension(entries)
+  try { body() } finally { Model.setCatalogExtension([]) }
+}
+
+test("a manifest becomes an entry in the same shape as a built-in one", () => {
+  const entry = pluginEntry(SPOTIFY_MANIFEST)
+  assert.equal(entry.type, "quickshell.spotify")
+  assert.equal(entry.name, "Omarchy Spotify")
+  assert.equal(entry.multiple, false)
+  assert.equal(entry.sourceUrl, "file:///x/BarWidget.qml")
+  assert.equal(entry._isPlugin, true)
+  assert.equal(entry._pluginAuthor, "QuickshellSpotify")
+  assert.equal(entry._pluginVersion, "1.0.4")
+  // Its footprints are a real list, which is what lets normalization treat it
+  // like any other type rather than exempt it.
+  assert.ok(entry.sizes.length > 0)
+  for (const [cols, rows] of entry.sizes) {
+    assert.ok(cols >= 1 && cols <= Model.MAX_COLUMNS)
+    assert.ok(rows >= 1 && rows <= Model.MAX_ROWS)
+  }
+})
+
+test("manifest setting types are bridged to the fields the inspector draws", () => {
+  const byKey = {}
+  for (const s of pluginEntry(SPOTIFY_MANIFEST).settings) byKey[s.key] = s
+
+  assert.equal(byKey.deviceName.type, "text")
+  assert.equal(byKey.deviceName.defaultValue, "Omarchy Spotify")
+  assert.equal(byKey.deviceName.help, "Shown in Devices immediately.")
+
+  // "integer" is the manifest's word for it; "number" is the field's.
+  assert.equal(byKey.idleShutdownMinutes.type, "number")
+  assert.deepEqual([byKey.idleShutdownMinutes.min, byKey.idleShutdownMinutes.max,
+    byKey.idleShutdownMinutes.step], [5, 120, 5])
+  // The schema entry carries no defaultValue, so it comes from `defaults`.
+  assert.equal(byKey.idleShutdownMinutes.defaultValue, 15)
+
+  assert.equal(byKey.showLyrics.type, "choice")
+  assert.deepEqual(byKey.showLyrics.options,
+    [{ value: "On", label: "On" }, { value: "Off", label: "Off" }])
+  assert.equal(byKey.showLyrics.defaultValue, "On")
+})
+
+test("a choice with no options is a text field, not a picker onto nothing", () => {
+  const bridged = Model.bridgePluginSetting({ key: "k", type: "enum", options: [] })
+  assert.equal(bridged.type, "text")
+})
+
+test("a plugin with defaults and no schema still has its settings", () => {
+  const entry = pluginEntry(KEYBOARD_MANIFEST)
+  assert.deepEqual(entry.settings, [], "nothing to configure, and nothing invented")
+
+  // With defaults but still no schema, the defaults are the description.
+  const entry2 = pluginEntry(Object.assign({}, KEYBOARD_MANIFEST, {
+    barWidget: { displayName: "K", defaults: { pulse: true, size: 12, layout: "us" } }
+  }))
+  const byKey = {}
+  for (const s of entry2.settings) byKey[s.key] = s
+  assert.deepEqual([byKey.pulse.type, byKey.pulse.defaultValue], ["boolean", true])
+  assert.deepEqual([byKey.size.type, byKey.size.defaultValue], ["number", 12])
+  assert.deepEqual([byKey.layout.type, byKey.layout.defaultValue], ["text", "us"])
+})
+
+test("a manifest without an id is not an entry", () => {
+  assert.equal(Model.buildPluginCatalogEntry({ name: "x" }, "barWidget", "file:///x"), null)
+  assert.equal(Model.buildPluginCatalogEntry(null, "barWidget", "file:///x"), null)
+  assert.equal(Model.buildPluginCatalogEntry("nonsense", "barWidget", "file:///x"), null)
+})
+
+test("discovered entries join the catalogue and are found by type", () => {
+  const builtInCount = Model.catalog().length
+  withPlugins([pluginEntry(SPOTIFY_MANIFEST)], () => {
+    assert.equal(Model.catalog().length, builtInCount + 1)
+    // First, so a plugin wins a name collision with a built-in: the entry the
+    // user installed is the one they meant.
+    assert.equal(Model.catalog()[0].type, "quickshell.spotify")
+    assert.ok(Model.catalogTypes().indexOf("quickshell.spotify") !== -1)
+    assert.equal(Model.catalogEntry("quickshell.spotify").name, "Omarchy Spotify")
+    assert.equal(Model.isPluginType("quickshell.spotify"), true)
+    assert.equal(Model.isPluginType("clock"), false)
+    // Interactive, so the surface gives its card back its own input region.
+    assert.equal(Model.isInteractiveType("quickshell.spotify"), true)
+  })
+  assert.equal(Model.catalog().length, builtInCount, "the extension is not sticky")
+  assert.equal(Model.isPluginType("quickshell.spotify"), false)
+})
+
+test("a plugin widget normalizes, sizes and lays out like any other", () => {
+  withPlugins([pluginEntry(SPOTIFY_MANIFEST)], () => {
+    let config = Model.addWidget(Model.defaultConfig(), "quickshell.spotify")
+    const added = Model.findInstance(config, "quickshell.spotify")
+    assert.ok(added)
+    assert.equal(added.enabled, true)
+    assert.deepEqual([added.cols, added.rows], Model.defaultSize("quickshell.spotify"))
+
+    // A footprint it does not offer is refused, the same as for a built-in.
+    config = Model.resizeWidget(config, "quickshell.spotify", 5, 5)
+    assert.deepEqual([Model.findInstance(config, "quickshell.spotify").cols,
+      Model.findInstance(config, "quickshell.spotify").rows],
+      Model.defaultSize("quickshell.spotify"))
+
+    // A hand-written config naming it survives a round trip.
+    const reloaded = Model.normalizeConfig(JSON.parse(JSON.stringify(config)))
+    assert.ok(Model.findInstance(reloaded, "quickshell.spotify"))
+
+    // Its settings go through the same gate as a built-in's.
+    config = Model.setSetting(config, "quickshell.spotify", "idleShutdownMinutes", 45)
+    assert.equal(Model.findInstance(config, "quickshell.spotify").settings.idleShutdownMinutes, 45)
+    config = Model.setSetting(config, "quickshell.spotify", "showLyrics", "Off")
+    assert.equal(Model.findInstance(config, "quickshell.spotify").settings.showLyrics, "Off")
+    // A value outside the choice falls back rather than being stored.
+    config = Model.setSetting(config, "quickshell.spotify", "showLyrics", "Maybe")
+    assert.equal(Model.findInstance(config, "quickshell.spotify").settings.showLyrics, "On")
+  })
+})
+
+test("a widget whose plugin is gone is dropped, not drawn", () => {
+  // Uninstalling a plugin leaves its widget in the config file. There is no
+  // QML to load for it any more, so it must not survive normalization.
+  const saved = { layout: { columns: 2 }, widgets: [
+    { id: "quickshell.spotify", type: "quickshell.spotify", enabled: true, col: 0, row: 0 }
+  ] }
+  withPlugins([pluginEntry(SPOTIFY_MANIFEST)], () => {
+    assert.ok(Model.findInstance(Model.normalizeConfig(saved), "quickshell.spotify"))
+  })
+  assert.equal(Model.findInstance(Model.normalizeConfig(saved), "quickshell.spotify"), null)
 })
 
 test("normalize survives junk without throwing", () => {
@@ -643,8 +879,33 @@ test("the smallest scale still leaves a grid that can be clicked", () => {
   assert.equal(Model.normalizeLayout({ ...Model.DEFAULT_LAYOUT, scale: 0 }).scale, Model.MIN_SCALE)
 })
 
+test("getting out of the way of a window is on unless a config says otherwise", () => {
+  assert.equal(Model.normalizeLayout(null).hideWhenWindows, true)
+  assert.equal(Model.normalizeLayout({}).hideWhenWindows, true,
+    "a config written before this field existed keeps meaning what it meant")
+  assert.equal(Model.normalizeLayout({ hideWhenWindows: false }).hideWhenWindows, false)
+  // Only an explicit false turns it off; anything else is the default.
+  for (const junk of [null, undefined, 0, "", "false", "no", [], {}])
+    assert.equal(Model.normalizeLayout({ hideWhenWindows: junk }).hideWhenWindows, true,
+      `${JSON.stringify(junk)} is not a no`)
+})
+
+test("setHideWhenWindows writes a boolean and touches nothing else", () => {
+  const cfg = clockConfig()
+  const off = Model.setHideWhenWindows(cfg, false)
+  assert.equal(off.layout.hideWhenWindows, false)
+  const on = Model.setHideWhenWindows(off, true)
+  assert.equal(on.layout.hideWhenWindows, true)
+  // Anything that is not true is off, so a stray string cannot leave the field
+  // holding something Surface.qml would read as truthy.
+  assert.equal(Model.setHideWhenWindows(cfg, "yes").layout.hideWhenWindows, false)
+  // The rest of the layout, and the widgets, are where they were.
+  assert.deepEqual({ ...off.layout, hideWhenWindows: true }, { ...cfg.layout, hideWhenWindows: true })
+  assert.deepEqual(off.widgets, cfg.widgets)
+})
+
 test("setOpacity is per widget and clamps into range", () => {
-  const cfg = Model.defaultConfig()
+  const cfg = clockConfig()
   // A fresh widget has no opacity of its own; it follows the grid's 0.72.
   assert.equal(Model.findInstance(cfg, "clock").opacity, null)
   assert.equal(Model.effectiveOpacity(cfg, Model.findInstance(cfg, "clock")), 0.72)
@@ -658,7 +919,7 @@ test("setOpacity is per widget and clamps into range", () => {
 })
 
 test("a card with no radius of its own resolves to the grid's, never to null", () => {
-  const cfg = Model.defaultConfig()
+  const cfg = clockConfig()
   const clock = Model.findInstance(cfg, "clock")
   // A fresh card carries null there, the way it does for opacity -- "follow
   // the grid" rather than a number of its own.
@@ -679,7 +940,7 @@ test("a card with no radius of its own resolves to the grid's, never to null", (
 })
 
 test("moving the global opacity re-applies it to every card", () => {
-  const cfg = Model.defaultConfig()
+  const cfg = clockConfig()
   const boosted = Model.setLayoutOpacity(cfg, 0.3)
   assert.equal(boosted.layout.opacity, 0.3)
   assert.equal(Model.findInstance(boosted, "clock").opacity, null)
@@ -744,6 +1005,37 @@ test("per-widget scale is gone: only the layout's scale exists", () => {
   assert.equal(Model.setScale(base, 0.8).layout.opacity, base.layout.opacity)
   assert.equal(Model.widgetRect(Model.setScale(base, 0.8).layout, clock, 2560).width,
     Model.blockWidth({ ...base.layout, scale: 0.8 }, 1))
+})
+
+test("flowRects grows a card to its content and pushes down only what it covers", () => {
+  const layout = Model.normalizeLayout({})
+  const w = (id, col, row, cols, rows) => ({ id, type: "clock", col, row, cols, rows })
+  const top = w("top", 0, 0, 2, 1)
+  const below = w("below", 0, 1, 1, 1)
+  const beside = w("beside", 2, 1, 1, 1)
+  const far = w("far", 1, 4, 1, 1)
+  const all = [far, beside, below, top]
+  const gap = Math.round(Model.scaledGap(layout))
+
+  // Nothing asked for: every card is exactly its cell.
+  const plain = Model.flowRects(layout, all, 2560, {})
+  for (const i of all) assert.deepEqual(plain[i.id], Model.widgetRect(layout, i, 2560))
+
+  // Asking for less than the cell changes nothing: cards only grow.
+  assert.deepEqual(Model.flowRects(layout, all, 2560, { top: 1 }), plain)
+
+  // A card twice its height pushes the one beneath it, not the one beside it,
+  // and the empty rows above `far` absorb the growth before it has to move.
+  const tall = plain.top.height * 2
+  const grown = Model.flowRects(layout, all, 2560, { top: tall })
+  assert.equal(grown.top.height, tall)
+  assert.equal(grown.below.y, grown.top.y + tall + gap)
+  assert.deepEqual(grown.beside, plain.beside)
+  assert.deepEqual(grown.far, plain.far)
+
+  // Growing enough to reach `far` moves it, and the push carries through.
+  const huge = Model.flowRects(layout, all, 2560, { top: plain.far.y * 2 })
+  assert.equal(huge.far.y, huge.top.y + huge.top.height + gap)
 })
 
 test("resetAppearance puts scale and opacity back to their defaults", () => {
@@ -895,6 +1187,78 @@ test("a card dropped over a cell lands in that cell", () => {
     }
   }
 })
+test("a drop that would push a grown card past the bottom is refused", () => {
+  const config = Model.normalizeConfig({
+    layout: { side: "right", columns: 2 },
+    widgets: [
+      { id: "clock", type: "clock", enabled: true, col: 0, row: 0 },
+      { id: "weather", type: "weather", enabled: true, col: 1, row: 0 }
+    ]
+  })
+  const W = 2560
+  const cell = Model.cellRect(config.layout, W, 0, 0, 1, 1, "right")
+  // The clock's content wants three cells' height; the screen has room for
+  // about two and a half.
+  const heights = { clock: cell.height * 3 }
+  const fit = { screenName: "", heights, maxBottom: cell.y + cell.height * 2.5 }
+
+  // Without `fit` nothing changes: the old answer, and no rects.
+  const plain = Model.dropTarget(config, "weather", cell.x, cell.y + 400, W)
+  assert.equal(plain.valid, true)
+  assert.equal(plain.rects, null)
+
+  // Weather under the clock would be pushed below the tall clock: refused.
+  const under = Model.cellRect(config.layout, W, 0, 1, 1, 1, "right")
+  const t = Model.dropTarget(config, "weather", under.x, under.y, W, fit)
+  assert.equal(t.valid, false)
+  assert.equal(t.preview, null)
+  assert.ok(t.rects.weather.y > under.y, "the rects show where it would really go")
+
+  // Beside it, in its own column, is fine.
+  const beside = Model.cellRect(config.layout, W, 1, 1, 1, 1, "right")
+  assert.equal(Model.dropTarget(config, "weather", beside.x, beside.y, W, fit).valid, true)
+
+  // The clock is already past the bottom; moving it sideways is not making
+  // anything worse, so it is allowed.
+  const clockBeside = Model.cellRect(config.layout, W, 1, 1, 1, 1, "right")
+  assert.equal(Model.dropTarget(config, "clock", clockBeside.x, cell.y, W, fit).valid, true)
+})
+
+test("per-card padding, max rows and alignment normalize and follow the layout", () => {
+  let c = Model.normalizeConfig({
+    widgets: [{ id: "clock", type: "clock", enabled: true, maxRows: -3, align: "sideways",
+      padding: { top: 500 } }]
+  })
+  let w = Model.findInstance(c, "clock")
+  assert.equal(w.maxRows, 0)
+  assert.equal(w.align, "top")
+  assert.deepEqual(w.padding, { top: Model.MAX_PADDING, right: 10, bottom: 10, left: 10 })
+
+  c = Model.clearCardPadding(c, "clock")
+  assert.equal(Model.findInstance(c, "clock").padding, null)
+  c = Model.setPadding(c, "top", 30)
+  assert.deepEqual(Model.effectivePadding(c, Model.findInstance(c, "clock")),
+    { top: 30, right: 10, bottom: 10, left: 10, theme: false })
+  c = Model.setPaddingTheme(c, true)
+  assert.equal(Model.effectivePadding(c, Model.findInstance(c, "clock")).theme, true)
+
+  // A card's own padding starts from the layout's and wins over the theme.
+  c = Model.setCardPadding(c, "clock", "left", 4)
+  assert.deepEqual(Model.effectivePadding(c, Model.findInstance(c, "clock")),
+    { top: 30, right: 10, bottom: 10, left: 4, theme: false })
+
+  c = Model.setMaxRows(Model.setAlign(c, "clock", "bottom"), "clock", 3)
+  w = Model.findInstance(c, "clock")
+  assert.equal(w.align, "bottom")
+  assert.equal(w.maxRows, 3)
+  assert.equal(Model.findInstance(Model.setAlign(c, "clock", "nope"), "clock").align, "top")
+
+  assert.equal(w.contentScale, 1)
+  assert.equal(Model.findInstance(Model.setContentScale(c, "clock", 1.5), "clock").contentScale, 1.5)
+  assert.equal(Model.findInstance(Model.setContentScale(c, "clock", 9), "clock").contentScale, Model.MAX_CONTENT_SCALE)
+  assert.equal(Model.findInstance(Model.setContentScale(c, "clock", "x"), "clock").contentScale, 1)
+})
+
 test("a card is judged by its own corner, not by how far it has drifted", () => {
   const config = Model.normalizeConfig({
     layout: { side: "right", columns: 2 },
@@ -972,7 +1336,7 @@ test("a card dragged off the grid has no target at all", () => {
   assert.equal(Model.dropTarget(config, "clock", W + 500, 100, W).cell, null)
 })
 test("dropping works the same on the left as on the right", () => {
-  let config = Model.setSide(Model.defaultConfig(), "left")
+  let config = Model.setSide(clockConfig(), "left")
   const W = 2560
   const r = Model.cellRect(config.layout, W, 1, 2, 1, 1, "left")
   const t = Model.dropTarget(config, "clock", r.x, r.y, W)
@@ -1243,7 +1607,7 @@ test("resizing moves the widget when the new size does not fit where it stands",
 })
 
 test("a size the type does not offer is refused", () => {
-  let config = Model.defaultConfig()
+  let config = clockConfig()
   config = Model.resizeWidget(config, "clock", 4, 4)
   assert.deepEqual([config.widgets[0].cols, config.widgets[0].rows], Model.defaultSize("clock"))
 })
@@ -2950,7 +3314,7 @@ test("a type says for itself whether a second one makes sense", () => {
 })
 
 test("ids are numbered, and the first one keeps the bare type name", () => {
-  let config = Model.defaultConfig()
+  let config = clockConfig()
   // The default config already has a clock called "clock". An update that
   // renamed it "clock-1" would break every config that mentions it.
   assert.equal(Model.nextInstanceId(config, "clock"), "clock-2")
@@ -2964,7 +3328,7 @@ test("ids are numbered, and the first one keeps the bare type name", () => {
 })
 
 test("adding another of a type puts it on the grid, in a free cell", () => {
-  let config = Model.defaultConfig()
+  let config = clockConfig()
   config = Model.addWidget(config, "clock")
   const added = Model.findInstance(config, "clock-2")
   assert.ok(added)
@@ -2988,7 +3352,7 @@ test("a second one of a type that reads one source is refused", () => {
 })
 
 test("duplicating copies the settings, which is the point of duplicating", () => {
-  let config = Model.defaultConfig()
+  let config = clockConfig()
   config = Model.setSetting(config, "clock", "timezone", "Asia/Kolkata")
   config = Model.setSetting(config, "clock", "label", "BLR")
   config = Model.resizeWidget(config, "clock", 2, 1)
@@ -3025,7 +3389,7 @@ test("duplicating something that cannot be duplicated changes nothing", () => {
 })
 
 test("the last of a type is switched off, not deleted", () => {
-  let config = Model.defaultConfig()
+  let config = clockConfig()
   assert.equal(Model.canRemove(config, "clock"), false,
     "deleting it would only mean the next config read put a fresh one back")
   const before = JSON.stringify(config)
@@ -3066,7 +3430,7 @@ test("the config will not grow past its ceiling however hard you press add", () 
 })
 
 test("several of a type name themselves apart, by label first and id after", () => {
-  let config = Model.defaultConfig()
+  let config = clockConfig()
   assert.equal(Model.displayName(config, Model.findInstance(config, "clock")), "Clock",
     "one of a type needs no qualifier")
 
@@ -3617,4 +3981,48 @@ test("a number too large to write as digits never reaches the card", () => {
 
   // A holding worth billions is a number, not an exponent.
   assert.equal(Model.cryptoMoneyLabel(10393516000, "usd"), "$10,393,516,000")
+})
+
+test("animation settings default to the old hard-coded behaviour and clamp", () => {
+  const d = Model.normalizeLayout({})
+  assert.equal(d.animStyle, "slide")
+  assert.equal(d.animDuration, 220)
+  assert.equal(Model.normalizeLayout({ animStyle: "bogus" }).animStyle, "slide")
+  assert.equal(Model.normalizeLayout({ animDuration: 99999 }).animDuration, 2000)
+  assert.equal(Model.normalizeLayout({ animDuration: 0 }).animDuration, 0)
+})
+
+test("setAnimStyle and setAnimDuration round trip and reject bad input", () => {
+  let c = Model.setAnimStyle(Model.defaultConfig(), "scale")
+  assert.equal(c.layout.animStyle, "scale")
+  assert.equal(Model.setAnimStyle(c, "nope").layout.animStyle, "slide")
+  c = Model.setAnimDuration(c, 400)
+  assert.equal(c.layout.animDuration, 400)
+  assert.equal(Model.setAnimDuration(c, -5).layout.animDuration, 0)
+})
+
+test("padding has a value per side, clamped, and setPadding changes one side", () => {
+  assert.deepEqual(Model.normalizeLayout({}).padding, { top: 10, right: 10, bottom: 10, left: 10 })
+  assert.deepEqual(Model.normalizeLayout({ padding: { top: -4, left: 999, right: "x" } }).padding,
+    { top: 0, right: 10, bottom: 10, left: Model.MAX_PADDING })
+  let c = Model.setPadding(Model.defaultConfig(), "left", 24)
+  assert.deepEqual(c.layout.padding, { top: 10, right: 10, bottom: 10, left: 24 })
+  assert.deepEqual(Model.setPadding(c, "middle", 5).layout.padding, c.layout.padding)
+
+  // Following the theme is opt-in, and keeps the four values for later.
+  assert.equal(Model.normalizeLayout({}).paddingTheme, false)
+  assert.equal(Model.normalizeLayout({ paddingTheme: "yes" }).paddingTheme, false)
+  c = Model.setPaddingTheme(c, true)
+  assert.equal(c.layout.paddingTheme, true)
+  assert.equal(c.layout.padding.left, 24)
+  assert.equal(Model.setPaddingTheme(c, false).layout.paddingTheme, false)
+})
+
+test("rowsThatFit counts the rows a screen is tall enough for", () => {
+  const layout = Model.normalizeLayout({ cellSize: 200, gap: 16, marginY: 40, scale: 1 })
+  // (1080 - 80 + 16) / 216 = 4.7
+  assert.equal(Model.rowsThatFit(layout, 1080), 4)
+  assert.equal(Model.rowsThatFit(layout, 10), 1, "always somewhere to drop")
+  assert.equal(Model.rowsThatFit(layout, 1e9), Model.MAX_ROWS)
+  assert.equal(Model.rowsThatFit(layout, NaN), 1)
 })

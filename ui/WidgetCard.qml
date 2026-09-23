@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
+import "../Model.js" as Model
 
 // The surface every desktop widget is drawn on: a translucent card that takes
 // its colors from the active Omarchy theme and lets the wallpaper through.

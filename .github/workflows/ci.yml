@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to a branch makes the first run's answer worthless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # qmllint comes from Qt 6's declarative tooling. It is installed before
+      # anything runs because the QML parse test in tests/ skips itself when it
+      # cannot find a linter -- a silent skip would turn "every QML file parses"
+      # into a test that passes on a runner that never opened one.
+      - name: Install qmllint
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y qt6-declarative-dev
+
+      - name: Check qmllint is on PATH
+        run: |
+          linter="$(command -v qmllint || command -v qmllint-qt6 || true)"
+          if [ -z "$linter" ]; then
+            echo "qmllint not found -- the QML parse test would skip silently" >&2
+            exit 1
+          fi
+          echo "using $linter"
+          "$linter" --version
+
+      # What `omarchy plugin validate` checks, on a runner that has no Omarchy.
+      # First, because a manifest this fails is a plugin that will not install
+      # however well the rest of it works.
+      - name: Validate manifest
+        run: npm run lint:manifest
+
+      - name: Lint QML
+        run: npm run lint:qml
+
+      - name: Test
+        run: npm test

@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install qmllint
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y qt6-declarative-dev
+
+      # A release is a tag people install from, so it is held to everything a
+      # pull request is held to, on the tag's own tree.
+      - name: Check
+        run: npm run check
+
+      # `omarchy plugin update` reads the version out of manifest.json, and a
+      # bug report quotes it. A tag that disagrees with it makes an installed
+      # plugin claim a version that was never released, which is the kind of
+      # thing nobody notices until they are trying to reproduce something.
+      - name: Tag matches manifest version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          manifest_version="$(node -p 'require("./manifest.json").version')"
+          tag_version="${TAG#v}"
+          if [ "$manifest_version" != "$tag_version" ]; then
+            echo "tag $TAG says $tag_version, manifest.json says $manifest_version" >&2
+            exit 1
+          fi
+          echo "$TAG matches manifest.json"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --generate-notes --verify-tag

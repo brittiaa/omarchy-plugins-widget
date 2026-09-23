@@ -1,0 +1,17 @@
+{
+  "name": "omarchy-widgets",
+  "version": "0.3.3",
+  "private": true,
+  "description": "Desktop widgets for Omarchy, and a host for the Omarchy plugins you have installed.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "lint:manifest": "node scripts/validate-manifest.js",
+    "lint:qml": "qmllint $(git ls-files '*.qml')",
+    "lint": "npm run lint:manifest && npm run lint:qml",
+    "check": "npm run lint && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

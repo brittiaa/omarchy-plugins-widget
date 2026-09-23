@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "ui"
 import "Model.js" as Model
 
 // The bar button and the popup behind it: one row per widget in the
@@ -16,7 +17,7 @@ import "Model.js" as Model
 // used to be a list you read is a list you scan.
 BarWidget {
   id: root
-  moduleName: "anishfn.widgets"
+  moduleName: "brittiaa.widgets"
 
   readonly property var service: bar && bar.shell && typeof bar.shell.serviceFor === "function"
     ? bar.shell.serviceFor(moduleName) : null

@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
+import "../Model.js" as Model
 
 // Everything that is true of one widget, in one panel.
 //
@@ -41,6 +41,7 @@ BorderSurface {
 
   readonly property color dim: Qt.darker(foreground, 1.5)
   readonly property string type: selected ? String(selected.type) : ""
+  readonly property bool isPlugin: selected !== null && Model.isPluginType(type)
 
   // One column of the flow. Wide enough for a path and narrow enough that a
   // toolbar-width panel holds four of them.
@@ -269,6 +270,129 @@ BorderSurface {
           }
         }
 
+        // How a plugin's panel sits in its card. Only a plugin has one: a
+        // built-in widget is drawn for a card and lays itself out.
+        Field {
+          label: "Padding"
+          visible: root.isPlugin
+          width: root.fieldWidth * 2
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+
+          Row {
+            spacing: Style.spacing.md
+
+            ButtonGroup {
+              anchors.verticalCenter: parent.verticalCenter
+              options: [{ value: "grid", label: "Grid" }, { value: "own", label: "Own" }]
+              value: root.selected && root.selected.padding ? "own" : "grid"
+              foreground: root.foreground
+              accent: root.accent
+              fontFamily: root.fontFamily
+              focusable: false
+              onChanged: function(v) {
+                if (!root.service || !root.selectedId) return
+                if (v === "grid") root.service.clearCardPadding(root.selectedId)
+                // Any side will do to start owning one: it copies the grid's
+                // four values, then sets this one to what it already was.
+                else root.service.setCardPadding(root.selectedId, "top",
+                  Model.effectivePadding(root.config, root.selected).top)
+              }
+            }
+
+            Repeater {
+              model: root.selected && root.selected.padding ? Model.PADDING_SIDES : []
+              delegate: NumberField {
+                required property string modelData
+                anchors.verticalCenter: parent.verticalCenter
+                label: ""
+                value: root.selected && root.selected.padding ? Math.round(root.selected.padding[modelData]) : 0
+                from: 0
+                to: Math.round(Model.MAX_PADDING)
+                stepSize: 2
+                fieldWidth: Style.space(60)
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                onModified: function(v) {
+                  if (root.service && root.selectedId) root.service.setCardPadding(root.selectedId, modelData, Number(v))
+                }
+              }
+            }
+          }
+        }
+
+        // How big the panel is drawn, in percent of its own size. Capped by
+        // the card's width: a panel already as wide as the card grows no more.
+        Field {
+          label: "Content size (%)"
+          visible: root.isPlugin
+          width: root.fieldWidth
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+
+          NumberField {
+            label: ""
+            value: root.selected ? Math.round(root.selected.contentScale * 100) : 100
+            from: Math.round(Model.MIN_CONTENT_SCALE * 100)
+            to: Math.round(Model.MAX_CONTENT_SCALE * 100)
+            stepSize: 10
+            fieldWidth: Style.space(84)
+            foreground: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
+            onModified: function(v) {
+              if (root.service && root.selectedId) root.service.setContentScale(root.selectedId, Number(v) / 100)
+            }
+          }
+        }
+
+        // How tall the card may grow with its content, in rows. 0 is no limit;
+        // past the limit the panel shrinks to fit instead.
+        Field {
+          label: "Max height (rows, 0 = none)"
+          visible: root.isPlugin
+          width: root.fieldWidth
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+
+          NumberField {
+            label: ""
+            value: root.selected ? root.selected.maxRows : 0
+            from: 0
+            to: Model.MAX_ROWS
+            stepSize: 1
+            fieldWidth: Style.space(84)
+            foreground: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
+            onModified: function(v) {
+              if (root.service && root.selectedId) root.service.setMaxRows(root.selectedId, Number(v))
+            }
+          }
+        }
+
+        // Where the panel sits when the card's cells are taller than it.
+        Field {
+          label: "Align"
+          visible: root.isPlugin
+          width: root.fieldWidth
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+
+          ButtonGroup {
+            options: [{ value: "top", label: "Top" }, { value: "center", label: "Center" }, { value: "bottom", label: "Bottom" }]
+            value: root.selected ? root.selected.align : "top"
+            foreground: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
+            focusable: false
+            onChanged: function(v) {
+              if (root.service && root.selectedId) root.service.setAlign(root.selectedId, v)
+            }
+          }
+        }
+
         Repeater {
           model: root.selected ? Model.settingsSchema(root.type) : []
 
@@ -292,6 +416,32 @@ BorderSurface {
                 modelData.extensions || "")
             }
           }
+        }
+
+        // Where this card came from, for the ones that came from somewhere.
+        //
+        // A built-in says nothing here: the answer would be "this plugin",
+        // which the user is already looking at. A discovered plugin names
+        // itself, because the settings above are its author's and the place to
+        // take a complaint about them is the plugin, not this repo -- and
+        // because the id is what `omarchy plugin` wants to be told.
+        Text {
+          readonly property var entry: root.selected ? Model.catalogEntry(root.type) : null
+
+          visible: entry && entry._isPlugin === true
+          width: root.fieldWidth
+          wrapMode: Text.Wrap
+          textFormat: Text.PlainText
+          text: {
+            if (!entry || entry._isPlugin !== true) return ""
+            var line = String(entry._pluginId || "")
+            if (entry._pluginVersion) line += "  " + String(entry._pluginVersion)
+            if (entry._pluginAuthor) line += "\nby " + String(entry._pluginAuthor)
+            return line
+          }
+          color: Qt.darker(root.foreground, 1.7)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
         }
       }
     }

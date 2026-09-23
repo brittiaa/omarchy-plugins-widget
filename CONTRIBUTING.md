@@ -100,7 +100,7 @@ Item {
 }
 ```
 
-**2. Add it to `catalog()` in [`Model.js`](Model.js).**
+**2. Add it to `catalog()` in [`model/Catalogue.js`](model/Catalogue.js).**
 
 ```js
 {
@@ -208,7 +208,7 @@ Item {
 
 Note what is *not* there: no background, no border, no `MouseArea`, no hex
 colour, no fixed pixel size, and no date arithmetic — `countdownParts` would
-live in `Model.js` with a test, because it is the part that can be wrong.
+live in `model/` with a test, because it is the part that can be wrong.
 
 [`widgets/Clock.qml`](widgets/Clock.qml) is the shipped version of exactly
 this shape; read it alongside.
@@ -325,8 +325,8 @@ declared before your QML sees it, so `settings.ticks` is always a boolean and
 `settings.format` is always one of your options. You never have to defend
 against a config file. A key you do not declare cannot be set.
 
-Adding a setting type means teaching `coerceSetting()` in `Model.js` and
-adding a control to [`SettingField.qml`](SettingField.qml), which is the one
+Adding a setting type means teaching `coerceSetting()` in `model/Config.js` and
+adding a control to [`SettingField.qml`](ui/SettingField.qml), which is the one
 file that knows how a setting kind is drawn. Both are short; say so in the PR.
 
 ## Names are a promise
@@ -441,13 +441,22 @@ re-instantiate a `keepLoaded` panel on hot-reload.
 ## Tests
 
 ```bash
-node --test tests/
+npm test          # node --test tests/*.test.js
+npm run lint      # manifest validation, then qmllint over every tracked .qml
+npm run check     # both, which is what CI runs on your pull request
 ```
 
-`Model.js` holds everything that does not need Qt, which is what lets it be
+(`node --test tests/` without the glob does not work on node 22: it reads the
+directory as a module path and fails before running anything.)
+
+`model/` holds everything that does not need Qt, which is what lets it be
 tested under plain node. **Put your widget's logic there**, not in the QML:
-parsing, formatting, unit conversion, anything with a right answer. The
-timezone arithmetic is the worked example — the QML draws, `Model.js` decides.
+parsing, formatting, unit conversion, anything with a right answer. Give it its
+own file (`model/YourWidget.js`, opening with `.pragma library` and importing
+what it needs, usually just `Util`), and re-export its names from
+[`Model.js`](Model.js) so the QML can reach them as `Model.yourFunction`. The
+timezone arithmetic in `model/Clock.js` is the worked example — the QML draws,
+the model decides.
 
 The suite already checks, for every widget in the catalogue, that its source
 file exists, its sizes are sane, and its settings schema is complete and
@@ -485,10 +494,10 @@ Code:
 
 - [ ] `type` and every `settings` key are names you are happy to keep forever
 - [ ] `icon` is one glyph, written as a `\u` escape
-- [ ] Logic with a right answer lives in `Model.js` and has a test
+- [ ] Logic with a right answer lives in `model/` and has a test
 - [ ] `settings` is a complete schema — every key your QML reads is declared
 - [ ] No `if (type === "…")` anywhere outside `widgets/`
-- [ ] `node --test tests/` passes
+- [ ] `npm run check` passes
 - [ ] `omarchy plugin validate .` passes
 - [ ] `qmllint` reports no errors on your QML
 
@@ -525,7 +534,7 @@ In roughly this order:
 4. **Are the names right?** They are permanent, so this is the last cheap
    moment to change them.
 5. **Is the logic tested?** Anything with a right answer belongs in
-   `Model.js` with a test beside it.
+   `model/` with a test beside it.
 
 Expect comments on the second point even if the code is perfect. Consistency
 is the feature.

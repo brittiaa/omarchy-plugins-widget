@@ -10,8 +10,12 @@
 </p>
 
 <p align="center">
+  <sub>A fork of <a href="https://github.com/anishfn/omarchy-widgets">anishfn/omarchy-widgets</a>, by Anish Gupta and contributors.</sub>
+</p>
+
+<p align="center">
   <a href="#install"><img alt="Install" src="https://img.shields.io/badge/install-omarchy%20plugin%20add-7fbbb3?style=for-the-badge"></a>
-  <a href="https://github.com/anishfn/omarchy-widgets/releases"><img alt="Releases" src="https://img.shields.io/github/v/release/anishfn/omarchy-widgets?style=for-the-badge&color=e8845f&label=release"></a>
+  <a href="https://github.com/brittiaa/omarchy-plugins-widget/releases"><img alt="Releases" src="https://img.shields.io/github/v/release/brittiaa/omarchy-plugins-widget?style=for-the-badge&color=e8845f&label=release"></a>
   <a href="CONTRIBUTING.md"><img alt="Contributing" src="https://img.shields.io/badge/widgets-welcome-dfd8c8?style=for-the-badge"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-8a9a9a?style=for-the-badge"></a>
 </p>
@@ -30,8 +34,8 @@
 ## Get it
 
 ```bash
-omarchy plugin add https://github.com/anishfn/omarchy-widgets.git
-omarchy plugin enable anishfn.widgets
+omarchy plugin add https://github.com/brittiaa/omarchy-plugins-widget.git
+omarchy plugin enable brittiaa.widgets
 ```
 
 That is the whole install. Plugins land disabled so you can read the code
@@ -45,7 +49,7 @@ what you can see, and picks `add` or `update` for you on a re-run. It runs from
 the copy you already have:
 
 ```bash
-~/.config/omarchy/plugins/anishfn.widgets/install --yes
+~/.config/omarchy/plugins/brittiaa.widgets/install --yes
 ```
 
 **Nothing is fetched and piped into a shell, and nothing installs somebody
@@ -59,28 +63,28 @@ plugins land disabled.
 
 | | |
 |---|---|
-| **Clone URL** | `https://github.com/anishfn/omarchy-widgets.git` |
-| **Plugin id** | `anishfn.widgets` |
+| **Clone URL** | `https://github.com/brittiaa/omarchy-plugins-widget.git` |
+| **Plugin id** | `brittiaa.widgets` |
 | **Requires** | Omarchy 4 (the Quickshell shell) |
-| **Update** | `~/.config/omarchy/plugins/anishfn.widgets/update` |
-| **Remove** | `omarchy plugin remove anishfn.widgets` |
+| **Update** | `~/.config/omarchy/plugins/brittiaa.widgets/update` |
+| **Remove** | `omarchy plugin remove brittiaa.widgets` |
 
 <sub>Removing the plugin leaves `~/.config/omarchy/widgets.json` alone.</sub>
 
 > **`omarchy plugin add` does not upgrade.** It refuses when the plugin is
 > already installed, so running the install line a second time reports an
 > error rather than pulling anything. Use `update` — either the script above
-> or `omarchy plugin update anishfn.widgets`.
+> or `omarchy plugin update brittiaa.widgets`.
 
-> **The id changed in 0.2.0.** It was `io.github.anishfn.widgets`. An id is
-> also a directory name, so an install made before the change sits under the
-> old one and none of the commands above will find it. Remove it and add it
-> again:
+> **Coming from the original plugin?** This fork installs as
+> `brittiaa.widgets`; upstream is `anishfn.widgets` (and, before 0.2.0,
+> `io.github.anishfn.widgets`). An id is also a directory name, so the two sit
+> side by side and would draw the desktop twice. Remove the old one first:
 >
 > ```bash
-> omarchy plugin remove io.github.anishfn.widgets
-> omarchy plugin add https://github.com/anishfn/omarchy-widgets.git
-> omarchy plugin enable anishfn.widgets
+> omarchy plugin remove anishfn.widgets
+> omarchy plugin add https://github.com/brittiaa/omarchy-plugins-widget.git
+> omarchy plugin enable brittiaa.widgets
 > ```
 >
 > Your desktop survives the round trip — `remove` leaves
@@ -147,6 +151,8 @@ says which.
   - [From a local copy](#from-a-local-copy)
 - [Turning widgets on and off](#turning-widgets-on-and-off)
   - [More than one of the same widget](#more-than-one-of-the-same-widget)
+- [Your installed plugins as cards](#your-installed-plugins-as-cards)
+- [Getting out of the way of windows](#getting-out-of-the-way-of-windows)
 - [Arranging them](#arranging-them)
   - [The bar, the tray and the inspector](#the-bar-the-tray-and-the-inspector)
   - [Two sides](#two-sides)
@@ -190,9 +196,11 @@ Draws widget cards on the desktop:
 
 | | |
 |---|---|
+| **What** | The widgets below, plus every Omarchy plugin you have installed that has a bar widget |
 | **Where** | A grid down the left edge, the right, or both, on the Bottom layer — above the wallpaper, beneath every window |
+| **When** | Gone while a window is in front of them, back when the desktop is clear |
 | **Colors** | From the active theme's palette; switching themes re-colors them live |
-| **Input** | None, unless a widget asks for it — [Music](#music), [Repo pulse](#repo-pulse), [Todos](#todos) |
+| **Input** | None, unless a widget asks for it — [Music](#music), [Repo pulse](#repo-pulse), [Todos](#todos), and every plugin card |
 | **Space** | Reserves none, and stays inside the area the bar has already claimed |
 | **Screens** | Every output by default, or one you name |
 | **Network** | Only the weather, GitHub, calendar and crypto widgets, only while they are on |
@@ -200,6 +208,10 @@ Draws widget cards on the desktop:
 Nothing here is a window. You cannot focus a widget or click it — it is
 something you see when you clear the screen. Arranging them happens in an
 editor of its own, so the widgets themselves never have to take input.
+
+**Nothing is on when you install it.** What belongs on your wallpaper is not
+something this can guess, so the list starts with everything switched off and
+an empty desktop.
 
 ## Install
 
@@ -248,7 +260,7 @@ version and the commit each plugin is on:
 
 ```
 Updated
-  anishfn.widgets              0.1.0 → 0.2.0         3374b22 → 5b634fe
+  brittiaa.widgets              0.1.0 → 0.2.0         3374b22 → 5b634fe
 ```
 
 A version that stayed put while the commits moved is shown as `(unchanged)`
@@ -258,7 +270,7 @@ manifest, which is a thing worth knowing about a plugin you just pulled.
 ### Updating
 
 ```bash
-~/.config/omarchy/plugins/anishfn.widgets/update
+~/.config/omarchy/plugins/brittiaa.widgets/update
 ```
 
 `update` ends by printing where the companion is, if you have it, and the one
@@ -268,7 +280,7 @@ does not run the line that adds it.
 Or by hand, which is the same thing without the restart:
 
 ```bash
-omarchy plugin update anishfn.widgets
+omarchy plugin update brittiaa.widgets
 omarchy restart shell
 ```
 
@@ -277,13 +289,13 @@ only, and rolls back if the result fails validation.
 
 ### From a local copy
 
-Put the folder at `~/.config/omarchy/plugins/anishfn.widgets/` and
+Put the folder at `~/.config/omarchy/plugins/brittiaa.widgets/` and
 enable the same id. A folder that is not a git checkout has nothing to pull
 from, so `update` will say so rather than pretending.
 
 ```bash
-omarchy plugin disable anishfn.widgets   # off, config kept
-omarchy plugin remove anishfn.widgets    # gone
+omarchy plugin disable brittiaa.widgets   # off, config kept
+omarchy plugin remove brittiaa.widgets    # gone
 ```
 
 ## Turning widgets on and off
@@ -335,6 +347,73 @@ Copies are named `clock-2`, `clock-3`, and so on, and the editor tells them
 apart by the **Label** (or **Title**) you give them, falling back to the id.
 The id is yours: rename it in the config file and it changes everywhere,
 including on the command line.
+
+## Your installed plugins as cards
+
+The list is not only the widgets in this repo. Every Omarchy plugin you have
+installed that has a **bar widget** also appears on it, and switching one on
+puts that plugin's widget on your wallpaper as a card.
+
+```
+$ ls ~/.config/omarchy/plugins
+quickshell.spotify  robzolkos.github  tmn73.calendar  melonamin.canary  ...
+```
+
+Those four show up in the popup beside `clock` and `weather`, with the names
+and the settings their own authors wrote. Nothing has to be added here for a
+plugin to appear, and nothing about the plugin has to change: it is the same
+QML the bar loads, given a card to draw in instead of a slot in the bar.
+
+| | |
+|---|---|
+| **Which ones** | Any plugin with an `entryPoints.barWidget`. A plugin that is only a service, a menu or a panel has nothing to put on a wallpaper and is passed over |
+| **Settings** | Read from the plugin's own manifest, drawn in the inspector like any other widget's. The inspector names the plugin and its author at the bottom |
+| **Sizes** | `2×2`, `2×1` and `1×1`. A manifest describes a place in a bar, not a footprint on a wallpaper, so these are offered rather than declared |
+| **Input** | A plugin card **is** clickable, unlike most widgets here. Its QML was written for the bar, where everything is, and nothing in a manifest says whether it would still make sense without it |
+| **New installs** | Found when the shell starts and whenever you open the editor. `omarchy-shell ipc call widgets rescanPlugins` finds one without either |
+
+A plugin widget is a full bar widget, not a picture of one, so the ones that
+open a popup or a panel cannot do that here: a popup is a window of its own and
+a card is not. Everything else it does — its own service, its own data, its own
+commands — works exactly as it does in the bar.
+
+Uninstall a plugin and its card stops being offered. The entry stays in your
+config file harmlessly until the next write; reinstall the plugin and it comes
+back with its settings intact.
+
+## Getting out of the way of windows
+
+The widgets slide off the edge of the screen when a window opens in front of
+them, and slide back when the desktop is clear again.
+
+```
+  desktop clear                  a window opens
+  ┌──────────────┐               ┌──────────────┐
+  │        ┌───┐ │               │ ┌──────────┐ │   ┌───┐
+  │        │ ▦ │ │      ──▶      │ │          │ │   │ ▦ │──▶
+  │        └───┘ │               │ │          │ │   └───┘
+  │        ┌───┐ │               │ └──────────┘ │   ┌───┐
+  │        │ ▦ │ │               │              │   │ ▦ │──▶
+  └──────────────┘               └──────────────┘   └───┘
+```
+
+They leave towards the side they already sit on, so a right-hand grid goes out
+to the right. It takes about a fifth of a second, and it reverses from wherever
+it has got to — open a window and close it again straight away and the grid
+turns around half way out rather than finishing the trip first.
+
+**It is measured per screen, on that screen's current workspace.** With a
+window on one monitor and an empty desktop on the other, only the monitor with
+the window loses its widgets. Switch to an empty workspace and they come back
+on that screen alone.
+
+While they are away they are properly away: a click where a plugin card used to
+be goes to the desktop, not to the card.
+
+Turn it off with **Hide behind windows → Off** in the editor's bottom bar, or
+`"hideWhenWindows": false` in the [layout block](#the-layout-block). Off, the
+widgets stay where they are and windows simply cover them, which is how earlier
+versions behaved.
 
 ## Arranging them
 
@@ -1116,13 +1195,14 @@ timezones, colors and rounding all survive, and each widget is given a cell.
 | `marginY` | Distance from the top of the usable desktop |
 | `scale` | Multiplies cell and gap together, `0.25`–`2` (25–200%). Global only: every card follows it |
 | `opacity` | How solid cards are over the wallpaper, `0`–`1`. Moving it applies to every card and clears the field below on each |
+| `hideWhenWindows` | `true` (the default) slides the grid off screen while a window is in front of it. `false` leaves it where it is |
 
 ### Each widget
 
 | Key | Meaning |
 |---|---|
 | `id` | Yours, and unique. The name the popup, the editor and the CLI use. Rename it and the widget is renamed everywhere |
-| `type` | Which widget: `clock`, `weather`, `github`, `repo-pulse`, `calendar`, `todos`, `music` |
+| `type` | Which widget: `clock`, `weather`, `github`, `repo-pulse`, `calendar`, `todos`, `music` — or the id of an installed plugin, like `quickshell.spotify` |
 | `enabled` | Whether it is on the desktop. The popup switch writes this |
 | `monitor` | Output name (`hyprctl monitors`), or `""` for all of them |
 | `side` | `left` or `right`. Omit it (or write anything else) and it is filled in with the layout's own side when the file is read |
@@ -1249,8 +1329,9 @@ omarchy-shell widgets refreshCrypto # fetch prices and balances now
 omarchy-shell widgets todos         # the list, as it was parsed
 omarchy-shell widgets todo '' 3 true # tick line 3 of the only list off
 omarchy-shell widgets reload        # re-read the file now
+omarchy-shell widgets rescanPlugins # look for newly installed plugins now
 
-omarchy-shell shell toggle anishfn.widgets   # open the bar popup
+omarchy-shell shell toggle brittiaa.widgets   # open the bar popup
 ```
 
 `add` and `duplicate` answer with the id of the widget they made, so a script
@@ -1270,7 +1351,7 @@ as the default rather than being kept.
 
 ## Adding a widget type
 
-The catalogue in [`Model.js`](Model.js) is the only place that knows what
+The catalogue in [`model/Catalogue.js`](model/Catalogue.js) is the only place that knows what
 widgets exist. Adding one is two steps:
 
 1. Write `widgets/YourWidget.qml`. It is handed `service`, `instance` and
@@ -1311,15 +1392,21 @@ mask and `exclusiveZone: 0`. The editor is a second surface on
 stands down while it is up. In practice:
 
 - widgets are painted over the wallpaper and under every window
-- they never take focus, never take a click, and never appear in a switcher
+- they never take focus and never appear in a switcher
+- a click passes through to the desktop, except over a card that asked for
+  input: [Music](#music), [Repo pulse](#repo-pulse), [Todos](#todos) and every
+  plugin card get their own rectangle back, and nothing else does
 - they do not push your windows around
 - they sit inside the space the bar left, so the top row lines up under it
+- they leave the screen while a window is in front of them, per monitor, and
+  take their input rectangles with them
 - arranging them happens on the editor's surface, never on theirs
 
 ## Development
 
 ```bash
-node --test tests/          # config, placement and clock math
+npm run check               # tests, manifest and qmllint, as CI runs them
+npm test                    # config, placement and clock math on their own
 omarchy plugin validate .   # manifest against the Omarchy schema
 dev/preview                 # draw the widgets without the shell (Ctrl-C to stop)
 dev/preview --edit          # ...with the layout editor already open
@@ -1338,8 +1425,9 @@ engine reports as a plugin that silently fails to appear: a handler set twice
 on one object, and a hand-written signal colliding with a property's
 generated `<name>Changed`.
 
-[`Model.js`](Model.js) holds every piece of logic that does not need Qt —
-the catalogue, config normalization, the grid, and the timezone arithmetic —
+[`Model.js`](Model.js) is the front door to [`model/`](model), which holds every
+piece of logic that does not need Qt — the catalogue, config normalization,
+the grid, and the timezone arithmetic —
 which is what lets the test suite run it under plain node.
 
 The drag is in there too, which is the point of it being there. A drag is only
@@ -1363,3 +1451,7 @@ C library search for it.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+This is a fork of [anishfn/omarchy-widgets](https://github.com/anishfn/omarchy-widgets),
+also MIT. The original copyright notice is kept in [LICENSE](LICENSE), as the
+licence requires, alongside the one for the changes made here.
